@@ -1,2 +1,0 @@
-print("TTTS")
-print("Test")
