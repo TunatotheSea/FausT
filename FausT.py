@@ -13,9 +13,6 @@ import fitz # PyMuPDF for PDF processing
 from google import genai
 from google.genai import types 
 
-# --- Streamlit Connections OAuth Import (이제 이 줄은 필요 없음. st.login()은 직접 st 모듈에 있음) ---
-# from streamlit.connections import BaseConnection, OAuthConnection # 이 줄은 삭제합니다!
-
 # --- Configuration and Initialization ---
 
 # Firebase Admin SDK 초기화
@@ -39,7 +36,7 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # Streamlit 페이지 설정
-st.set_page_config(page_title="FausT", layout="wide") 
+st.set_page_config(page_title="FausT", layout="wide", page_icon="assets/faust_icon.png") # 페이지 아이콘 추가
 
 # --- Global Gemini Client Instance ---
 @st.cache_resource
@@ -50,15 +47,13 @@ def get_gemini_client_instance():
 gemini_client = get_gemini_client_instance()
 
 # --- Session State Initialization ---
-# 사용자 ID 및 인증 상태 관리를 위한 변수 초기화
 if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4()) # Firestore에 사용할 실제 ID (UUID 또는 Google 이메일)
+    st.session_state.user_id = str(uuid.uuid4())
 if "is_logged_in" not in st.session_state:
-    st.session_state.is_logged_in = False # 로그인 여부 플래그
+    st.session_state.is_logged_in = False
 if "logged_in_user_email" not in st.session_state:
-    st.session_state.logged_in_user_email = None # 로그인된 사용자의 이메일 (표시용)
+    st.session_state.logged_in_user_email = None
 
-# 기존 세션 상태 변수들
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  
 if "chat_session" not in st.session_state:
@@ -391,6 +386,7 @@ if st.session_state.chat_session is None:
 
 # --- Sidebar UI ---
 with st.sidebar:
+    st.image("assets/faust_icon.png", width=100) # 사이드바 로고 추가
     st.header("✨ FausT 채팅") 
 
     # --- 계정 관리 섹션 ---
@@ -399,9 +395,7 @@ with st.sidebar:
     if st.session_state.is_logged_in: # 로그인된 상태
         st.success(f"로그인 됨: **{st.session_state.logged_in_user_email}**")
         st.markdown(f"사용자 ID: `{st.session_state.user_id}`") 
-        # `st.logout()` 함수는 on_click 콜백으로 사용합니다.
         st.button("로그아웃", on_click=st.logout, use_container_width=True, disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending)
-        # st.logout() 호출 시 앱이 새로고침되고, 세션 상태가 초기화됩니다.
     else: # 로그인되지 않은 상태 (익명)
         st.info("로그인하지 않은 상태입니다. 현재 대화는 이 기기에만 임시 저장됩니다.")
         st.markdown(f"익명 ID: `{st.session_state.user_id}`") # 익명 ID 표시
@@ -409,12 +403,13 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("**Google 계정으로 로그인**")
         st.write("아래 버튼을 클릭하여 Google 계정으로 로그인하세요.")
-        # `st.login()` 함수는 on_click 콜백으로 사용합니다.
-        # Google이 기본 OIDC 제공업체로 설정되어 있으므로 인자 없이 호출합니다.
         st.button("Google로 로그인", on_click=st.login, args=["google"], use_container_width=True, disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending)
-        # st.login() 호출 시 앱이 리디렉션되므로, 그 이후 코드가 실행되지 않도록 st.stop()을 사용합니다.
-        # Streamlit은 로그인 후 새 세션으로 앱을 재실행합니다.
-        st.stop() # 로그인 버튼이 눌리면 이 시점에서 앱 실행 중지
+        # 이제 st.stop()은 제거합니다. 익명 사용자도 앱의 메인 기능을 사용할 수 있도록 허용합니다.
+        # st.stop() 
+        st.write("---") # UI 구분선 추가
+        st.write("로그인 없이 계속하기") 
+        st.write("익명 모드로 채팅을 시작합니다. 대화 이력은 저장되지 않습니다.")
+
 
     st.markdown("---")
 
@@ -691,9 +686,14 @@ if st.session_state.editing_instruction:
 chat_display_container = st.container()
 
 # --- Final Chat History Display (Always Rendered) ---
+# FausT AI 아바타 및 사용자 아바타 상수 정의 (파일 상단으로 옮겨도 됩니다)
+FAUST_AI_AVATAR = "assets/faust_icon.png" # FausT의 아이콘 이미지 경로
+USER_AVATAR = "🧑‍⚕️" # 사용자 아바타 (의사 이모지 유지)
+
 with chat_display_container:
     for i, (role, message) in enumerate(st.session_state.chat_history):
-        with st.chat_message("ai" if role == "model" else "user"):
+        with st.chat_message("ai" if role == "model" else "user", 
+                             avatar=FAUST_AI_AVATAR if role == "model" else USER_AVATAR): # 아바타 적용
             st.markdown(message)
             if role == "model" and i == len(st.session_state.chat_history) - 1 and not st.session_state.is_generating \
                 and not st.session_state.delete_confirmation_pending: 
