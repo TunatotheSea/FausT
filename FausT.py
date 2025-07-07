@@ -1,6 +1,6 @@
 import streamlit as st
 import firebase_admin
-from firebase_admin import credentials, firestore, auth # 'auth' 모듈 추가
+from firebase_admin import credentials, firestore
 import os
 import uuid
 import json
@@ -13,6 +13,9 @@ import fitz # PyMuPDF for PDF processing
 from google import genai
 from google.genai import types 
 
+# --- Streamlit Connections OAuth Import (이제 이 줄은 필요 없음. st.login()은 직접 st 모듈에 있음) ---
+# from streamlit.connections import BaseConnection, OAuthConnection # 이 줄은 삭제합니다!
+
 # --- Configuration and Initialization ---
 
 # Firebase Admin SDK 초기화
@@ -24,7 +27,7 @@ if not firebase_admin._apps:
             firebase_admin.initialize_app(cred)
             print("Firebase Admin SDK initialized.")
         except json.JSONDecodeError as e:
-            st.error(f"Firebase Credential Path 환경 변수 JSON 형식이 잘못되었습니다: {e}")
+            st.error(f"Firebase Credential Path 환경 변수의 JSON 형식이 잘못되었습니다: {e}")
             st.stop()
         except Exception as e:
             st.error(f"Firebase Admin SDK 초기화 오류: {e}")
@@ -36,7 +39,7 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 # Streamlit 페이지 설정
-st.set_page_config(page_title="GenX", layout="wide")
+st.set_page_config(page_title="FausT", layout="wide") 
 
 # --- Global Gemini Client Instance ---
 @st.cache_resource
@@ -47,9 +50,9 @@ def get_gemini_client_instance():
 gemini_client = get_gemini_client_instance()
 
 # --- Session State Initialization ---
-# 사용자 ID와 인증 상태 관리를 위한 새로운 변수 추가 및 초기화 로직 변경
+# 사용자 ID 및 인증 상태 관리를 위한 변수 초기화
 if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4()) # Firestore에 사용할 실제 ID (UUID 또는 Firebase UID)
+    st.session_state.user_id = str(uuid.uuid4()) # Firestore에 사용할 실제 ID (UUID 또는 Google 이메일)
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False # 로그인 여부 플래그
 if "logged_in_user_email" not in st.session_state:
@@ -119,7 +122,7 @@ SUPER_INTRODUCTION_TAIL = """
 think about it step-by-step always
 
 """
-default_system_instruction = "당신의 이름은 GenX입니다. 다만, 이 이름은 다른 이름이 선택되면 잊어버리십시오. 우선순위가 제일 낮습니다."
+default_system_instruction = "당신의 이름은 FausT입니다. 다만, 이 이름은 다른 이름이 선택되면 잊어버리십시오. 우선순위가 제일 낮습니다."
 
 PERSONA_LIST = [
     "당신은 매우 활발하고 외향적인 성격입니다. 챗봇의 답변이 생동감 넘치고 에너지 넘치는지 평가하십시오. 사용자와 적극적으로 소통하고 즐거움을 제공하는지 중요하게 생각합니다.",
@@ -263,73 +266,9 @@ def evaluate_response(user_input, chat_history, system_instruction, ai_response)
         print(f"Supervisor 모델 호출 중 오류 발생: {e}")
         return 50 
 
-# --- Firebase Authentication Functions ---
-def get_user_by_email(email):
-    """Firebase Authentication에서 이메일로 사용자 정보를 가져옵니다."""
-    try:
-        user = auth.get_user_by_email(email)
-        return user
-    except auth.UserNotFoundError: # 사용자를 찾을 수 없는 경우
-        return None
-    except Exception as e:
-        st.error(f"사용자 조회 중 오류 발생: {e}")
-        return None
-
-def create_firebase_user(email):
-    """Firebase Authentication에 새 사용자를 생성합니다."""
-    try:
-        user = auth.create_user(email=email)
-        return user
-    except Exception as e:
-        st.error(f"사용자 생성 중 오류 발생: {e}")
-        return None
-
-def login_user(email):
-    """사용자를 로그인 처리하고 세션 상태를 업데이트합니다."""
-    user = get_user_by_email(email)
-    if not user:
-        st.warning(f"'{email}' 계정을 찾을 수 없습니다. 새로운 계정을 생성합니다.")
-        user = create_firebase_user(email)
-        if not user:
-            return False # 사용자 생성 실패
-        st.success(f"새 계정 '{email}'이(가) 생성되었습니다.")
-
-    st.session_state.user_id = user.uid # Firebase UID를 user_id로 설정 (데이터 저장에 사용)
-    st.session_state.is_logged_in = True # 로그인 상태 플래그 설정
-    st.session_state.logged_in_user_email = email # 로그인된 이메일 저장 (UI 표시용)
-    st.session_state.data_loaded = False # 새 user_id로 데이터 강제 재로드
-    st.toast(f"'{email}'님, 환영합니다! 데이터를 불러오는 중입니다.", icon="🎉")
-    return True
-
-def logout_user():
-    """사용자를 로그아웃하고 세션 상태를 초기화합니다."""
-    st.session_state.user_id = str(uuid.uuid4()) # 로그아웃 시 다시 임시 UUID 사용
-    st.session_state.is_logged_in = False # 로그인 상태 플래그 해제
-    st.session_state.logged_in_user_email = None # 이메일 정보 삭제
-
-    # 현재 대화 세션 관련 데이터 모두 초기화
-    st.session_state.chat_history = []
-    st.session_state.chat_session = None # 세션 객체도 초기화하여 새로 생성되게 함
-    st.session_state.saved_sessions = {}
-    st.session_state.current_title = "새로운 대화"
-    st.session_state.system_instructions = {}
-    st.session_state.temp_system_instruction = default_system_instruction
-    st.session_state.editing_instruction = False
-    st.session_state.editing_title = False
-    st.session_state.new_title = "새로운 대화"
-    st.session_state.regenerate_requested = False
-    st.session_state.uploaded_file = None
-    st.session_state.is_generating = False
-    st.session_state.last_user_input_gemini_parts = []
-    st.session_state.delete_confirmation_pending = False
-    st.session_state.title_to_delete = None
-
-    st.session_state.data_loaded = False # 데이터 강제 재로드 (새 익명 ID로)
-    st.toast("로그아웃 되었습니다.", icon="👋")
-    st.rerun() # 로그아웃 후 앱 새로고침하여 초기 로그인 UI 표시
-
-# --- Firestore Data Management ---
+# --- Firebase User Data Management Functions ---
 def load_user_data_from_firestore(user_id):
+    """지정된 user_id로 Firestore에서 사용자 데이터를 로드합니다."""
     try:
         sessions_ref = db.collection("user_sessions").document(user_id)
         doc = sessions_ref.get()
@@ -358,6 +297,7 @@ def load_user_data_from_firestore(user_id):
             )
             st.toast(f"Firestore에서 사용자 ID '{user_id}'의 데이터를 불러왔습니다.", icon="✅")
         else:
+            # 데이터가 없는 경우 새로운 사용자 데이터 초기화
             st.session_state.saved_sessions = {}
             st.session_state.system_instructions = {}
             st.session_state.chat_history = []
@@ -387,6 +327,12 @@ def load_user_data_from_firestore(user_id):
         )
 
 def save_user_data_to_firestore(user_id):
+    """현재 사용자 데이터를 Firestore에 저장합니다. 로그인된 사용자만 저장합니다."""
+    # 비로그인(익명) 사용자일 경우 Firestore에 저장하지 않습니다.
+    if not st.session_state.is_logged_in:
+        print(f"익명 사용자 '{user_id}'의 데이터는 Firestore에 저장하지 않습니다.")
+        return
+
     try:
         sessions_ref = db.collection("user_sessions").document(user_id)
         chat_data_to_save = {}
@@ -406,37 +352,35 @@ def save_user_data_to_firestore(user_id):
         st.error(error_message)
 
 # --- App Logic Execution Flow ---
-# 앱 시작 시 사용자 데이터 로드
-# user_id가 UUID 형태이면 익명 사용자, Firebase UID 형태이면 로그인된 사용자.
-# 로그인 상태에 따라 user_id를 결정하고, 해당 user_id로 Firestore 데이터 로드.
+# 앱 시작 시 사용자 인증 상태 확인 및 데이터 로드
 if not st.session_state.data_loaded:
-    effective_user_id = st.session_state.user_id # 기본은 현재 user_id (UUID)
-
-    # 만약 이전에 로그인해서 user_id가 UUID가 아니고, logged_in_user_email이 있다면 로그인 상태 유지 시도
-    if st.session_state.is_logged_in and st.session_state.logged_in_user_email:
-        try:
-            # Firebase Auth에서 해당 이메일의 유저 정보를 다시 가져와 UID를 확인
-            user = auth.get_user_by_email(st.session_state.logged_in_user_email)
-            if user:
-                effective_user_id = user.uid
-                st.session_state.user_id = user.uid # 혹시 모를 불일치 방지
-                st.toast(f"'{st.session_state.logged_in_user_email}'님으로 로그인 상태를 유지합니다.", icon="✨")
-            else: # 이메일은 있지만 Firebase에서 유저를 못 찾으면 로그아웃 처리
-                st.session_state.is_logged_in = False
-                st.session_state.logged_in_user_email = None
-                st.session_state.user_id = str(uuid.uuid4()) # 새 익명 ID 발급
-                st.toast("이전 로그인 정보가 유효하지 않아 익명으로 전환됩니다.", icon="⚠️")
-        except Exception as e:
-            st.error(f"로그인 상태 확인 중 오류 발생: {e}. 익명으로 전환됩니다.")
-            st.session_state.is_logged_in = False
+    # st.user 객체는 OIDC 로그인 상태를 자동으로 반영합니다.
+    if st.user.is_logged_in:
+        # 로그인된 사용자 정보 (st.user는 dict-like 객체)
+        user_email = st.user.get("email") 
+        if user_email: # 이메일 정보가 있다면
+            st.session_state.user_id = user_email # 이메일을 user_id로 사용
+            st.session_state.is_logged_in = True
+            st.session_state.logged_in_user_email = user_email
+            st.toast(f"'{user_email}'님으로 로그인되었습니다.", icon="🎉")
+            print(f"Logged in user: {user_email}")
+        else: # 로그인되었으나 이메일 정보가 없는 경우 (매우 드물지만, OIDC 설정에 따라 가능)
+            st.session_state.is_logged_in = False # 익명으로 처리
             st.session_state.logged_in_user_email = None
-            st.session_state.user_id = str(uuid.uuid4()) # 새 익명 ID 발급
+            st.session_state.user_id = str(uuid.uuid4()) # 익명 ID로 폴백
+            st.toast("Google 로그인에 성공했으나 이메일 정보를 가져올 수 없습니다. 익명으로 전환됩니다.", icon="⚠️")
+            print("OAuth succeeded but email not found in st.user. Falling back to anonymous.")
+    else: # 로그인되지 않은 상태
+        st.session_state.is_logged_in = False
+        st.session_state.logged_in_user_email = None
+        # st.session_state.user_id는 이미 초기화 시 str(uuid.uuid4())로 설정되어 있습니다.
+        st.toast("로그인하지 않은 상태입니다. 대화 이력은 이 기기에만 임시 저장됩니다.", icon="ℹ️")
+        print("User is not logged in. Using anonymous ID.")
 
-
-    load_user_data_from_firestore(effective_user_id)
+    load_user_data_from_firestore(st.session_state.user_id) # 결정된 user_id로 데이터 로드
     st.session_state.data_loaded = True
 
-# ChatSession이 None일 경우 (앱 시작 시 또는 로그아웃 후) 초기화
+# ChatSession이 None일 경우 초기화 (앱 시작 시 또는 로그아웃 후)
 if st.session_state.chat_session is None:
     current_instruction = st.session_state.system_instructions.get(st.session_state.current_title, default_system_instruction)
     st.session_state.chat_session = create_new_chat_session(
@@ -447,46 +391,49 @@ if st.session_state.chat_session is None:
 
 # --- Sidebar UI ---
 with st.sidebar:
-    st.header("✨ GenX 채팅")
+    st.header("✨ FausT 채팅") 
 
     # --- 계정 관리 섹션 ---
     st.markdown("---")
     st.subheader("👤 계정 관리")
     if st.session_state.is_logged_in: # 로그인된 상태
         st.success(f"로그인 됨: **{st.session_state.logged_in_user_email}**")
-        st.markdown(f"Firebase UID: `{st.session_state.user_id}`")
-        if st.button("로그아웃", use_container_width=True, disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending):
-            logout_user()
-    else: # 로그인되지 않은 상태 (익명 또는 새로 진입)
-        st.info("로그인하지 않은 상태입니다. 대화 이력은 이 기기에만 저장됩니다.")
-        st.markdown(f"현재 익명 ID: `{st.session_state.user_id}`") # 익명 ID 표시
+        st.markdown(f"사용자 ID: `{st.session_state.user_id}`") 
+        # `st.logout()` 함수는 on_click 콜백으로 사용합니다.
+        st.button("로그아웃", on_click=st.logout, use_container_width=True, disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending)
+        # st.logout() 호출 시 앱이 새로고침되고, 세션 상태가 초기화됩니다.
+    else: # 로그인되지 않은 상태 (익명)
+        st.info("로그인하지 않은 상태입니다. 현재 대화는 이 기기에만 임시 저장됩니다.")
+        st.markdown(f"익명 ID: `{st.session_state.user_id}`") # 익명 ID 표시
 
-        user_email_input = st.text_input("구글 계정 이메일 입력", key="google_email_input",
-                                           help="Firebase에 이메일 계정을 생성하거나 기존 계정으로 로그인합니다. **비밀번호는 필요 없습니다.**",
-                                           disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending)
-        if st.button("로그인 / 계정 생성", use_container_width=True,
-                             disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending):
-            if user_email_input and "@" in user_email_input and "." in user_email_input: # 간단한 이메일 형식 검사
-                if login_user(user_email_input):
-                    st.rerun() # 로그인 성공 시 새로고침하여 데이터 로드
-            else:
-                st.error("유효한 이메일 주소를 입력해주세요.")
+        st.markdown("---")
+        st.markdown("**Google 계정으로 로그인**")
+        st.write("아래 버튼을 클릭하여 Google 계정으로 로그인하세요.")
+        # `st.login()` 함수는 on_click 콜백으로 사용합니다.
+        # Google이 기본 OIDC 제공업체로 설정되어 있으므로 인자 없이 호출합니다.
+        st.button("Google로 로그인", on_click=st.login, args=["google"], use_container_width=True, disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending)
+        # st.login() 호출 시 앱이 리디렉션되므로, 그 이후 코드가 실행되지 않도록 st.stop()을 사용합니다.
+        # Streamlit은 로그인 후 새 세션으로 앱을 재실행합니다.
+        st.stop() # 로그인 버튼이 눌리면 이 시점에서 앱 실행 중지
+
     st.markdown("---")
 
     if st.button("➕ 새로운 대화", use_container_width=True,
                              disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending):
-        if st.session_state.current_title != "새로운 대화" and st.session_state.chat_history:
+        # 현재 대화 상태를 저장 (로그인된 사용자만)
+        if st.session_state.is_logged_in and st.session_state.current_title != "새로운 대화" and st.session_state.chat_history:
             st.session_state.saved_sessions[st.session_state.current_title] = st.session_state.chat_history.copy()
             current_instruction_to_save = st.session_state.temp_system_instruction if st.session_state.temp_system_instruction is not None else st.session_state.system_instructions.get(st.session_state.current_title, default_system_instruction)
             st.session_state.system_instructions[st.session_state.current_title] = current_instruction_to_save
-            save_user_data_to_firestore(st.session_state.user_id)
+            save_user_data_to_firestore(st.session_state.user_id) # 로그인된 사용자만 저장
 
+        # 새로운 대화 상태로 초기화
         st.session_state.chat_session = None 
         st.session_state.chat_history = []
         st.session_state.current_title = "새로운 대화"
         st.session_state.temp_system_instruction = default_system_instruction 
         st.session_state.editing_instruction = False
-        st.session_state.saved_sessions["새로운 대화"] = [] 
+        st.session_state.saved_sessions["새로운 대화"] = [] # 빈 목록으로 저장되도록 보장 (Firestore에 저장되진 않음)
         st.session_state.system_instructions["새로운 대화"] = default_system_instruction
 
         # --- 새로운 ChatSession 초기화 ---
@@ -495,7 +442,9 @@ with st.sidebar:
             [], 
             default_system_instruction 
         )
-        save_user_data_to_firestore(st.session_state.user_id)
+        # 로그인된 사용자만 저장 (새로운 대화 시작 시점)
+        if st.session_state.is_logged_in:
+            save_user_data_to_firestore(st.session_state.user_id)
         st.rerun()
 
     if st.session_state.saved_sessions:
@@ -509,11 +458,12 @@ with st.sidebar:
             display_key = key if len(key) <= 30 else key[:30] + "..."
             if st.button(f"💬 {display_key}", use_container_width=True, key=f"load_session_{key}",
                                  disabled=st.session_state.is_generating or st.session_state.delete_confirmation_pending):
-                if st.session_state.current_title != "새로운 대화" and st.session_state.chat_history:
+                # 현재 대화 상태를 저장 (로그인된 사용자만)
+                if st.session_state.is_logged_in and st.session_state.current_title != "새로운 대화" and st.session_state.chat_history:
                     st.session_state.saved_sessions[st.session_state.current_title] = st.session_state.chat_history.copy()
                     current_instruction_to_save = st.session_state.temp_system_instruction if st.session_state.temp_system_instruction is not None else st.session_state.system_instructions.get(st.session_state.current_title, default_system_instruction)
                     st.session_state.system_instructions[st.session_state.current_title] = current_instruction_to_save
-                    save_user_data_to_firestore(st.session_state.user_id) 
+                    save_user_data_to_firestore(st.session_state.user_id) # 로그인된 사용자만 저장
 
                 st.session_state.chat_history = st.session_state.saved_sessions[key]
                 st.session_state.current_title = key
@@ -529,7 +479,9 @@ with st.sidebar:
                 )
                 st.session_state.editing_instruction = False
                 st.session_state.editing_title = False
-                save_user_data_to_firestore(st.session_state.user_id)
+                # 로그인된 사용자만 저장 (대화 로드 시점)
+                if st.session_state.is_logged_in:
+                    save_user_data_to_firestore(st.session_state.user_id)
                 st.rerun()
 
     with st.expander("⚙️ 설정"):
@@ -618,7 +570,9 @@ with col2:
                     st.session_state.saved_sessions[new_title] = st.session_state.saved_sessions.pop(st.session_state.current_title)
                     st.session_state.system_instructions[new_title] = st.session_state.system_instructions.pop(st.session_state.current_title)
                     st.session_state.current_title = new_title
-                    save_user_data_to_firestore(st.session_state.user_id)
+                    # 로그인된 사용자만 저장
+                    if st.session_state.is_logged_in:
+                        save_user_data_to_firestore(st.session_state.user_id)
                     st.toast(f"대화 제목이 '{st.session_state.current_title}'로 변경되었습니다.", icon="📝")
                 else:
                     st.warning("이전 대화 제목을 찾을 수 없습니다. 저장 후 다시 시도해주세요.")
@@ -656,7 +610,9 @@ if st.session_state.delete_confirmation_pending:
                 st.toast("현재 대화가 초기화되었습니다.", icon="🗑️")
                 st.session_state.saved_sessions["새로운 대화"] = [] 
                 st.session_state.system_instructions["새로운 대화"] = default_system_instruction
-                save_user_data_to_firestore(st.session_state.user_id)
+                # 로그인된 사용자만 저장
+                if st.session_state.is_logged_in:
+                    save_user_data_to_firestore(st.session_state.user_id)
             else:
                 deleted_title = st.session_state.title_to_delete
                 if deleted_title in st.session_state.saved_sessions:
@@ -675,7 +631,9 @@ if st.session_state.delete_confirmation_pending:
                     if "새로운 대화" not in st.session_state.saved_sessions: 
                         st.session_state.saved_sessions["새로운 대화"] = []
                         st.session_state.system_instructions["새로운 대화"] = default_system_instruction
-                    save_user_data_to_firestore(st.session_state.user_id)
+                    # 로그인된 사용자만 저장
+                    if st.session_state.is_logged_in:
+                        save_user_data_to_firestore(st.session_state.user_id)
                 else:
                     st.warning(f"'{deleted_title}' 대화를 찾을 수 없습니다. 이미 삭제되었거나 저장되지 않았습니다.")
 
@@ -717,7 +675,9 @@ if st.session_state.editing_instruction:
                     current_instruction 
                 )
 
-                save_user_data_to_firestore(st.session_state.user_id)
+                # 로그인된 사용자만 저장
+                if st.session_state.is_logged_in:
+                    save_user_data_to_firestore(st.session_state.user_id)
                 st.success("AI 설정이 저장되었습니다.")
                 st.session_state.editing_instruction = False
                 st.rerun()
@@ -833,16 +793,12 @@ if st.session_state.is_generating:
                     full_response = "" 
 
                     try:
-                        # ChatSession을 현재 chat_history에 맞춰 재초기화합니다.
-                        # 이는 `send_message_stream`을 호출하기 전에, ChatSession이 올바른 history를 가지고 있도록 보장합니다.
                         st.session_state.chat_session = create_new_chat_session(
                             st.session_state.selected_model,
-                            st.session_state.chat_history, # 현재까지의 대화 이력 (사용자 메시지 포함)
+                            st.session_state.chat_history, 
                             current_instruction
                         )
 
-                        # --- 메시지 전송 (send_message_stream) ---
-                        # 'stream' 키워드 인자 없이, `send_message_stream` 메서드를 사용합니다.
                         response_stream = st.session_state.chat_session.send_message_stream(initial_user_contents)
 
                         for chunk in response_stream:
@@ -896,14 +852,12 @@ if st.session_state.is_generating:
                 message_placeholder.markdown("🤖 답변 생성 중...")
                 full_response = ""
                 try:
-                    # ChatSession을 현재 chat_history에 맞춰 재초기화합니다.
                     st.session_state.chat_session = create_new_chat_session(
                         st.session_state.selected_model,
                         st.session_state.chat_history, 
                         current_instruction
                     )
 
-                    # --- 메시지 전송 (send_message_stream) ---
                     response_stream = st.session_state.chat_session.send_message_stream(initial_user_contents)
 
                     for chunk in response_stream:
@@ -965,9 +919,11 @@ if st.session_state.is_generating:
                     st.session_state.current_title = title_key
                     st.toast(f"대화 제목이 '{title_key}'로 설정되었습니다.", icon="📝")
 
-            st.session_state.saved_sessions[st.session_state.current_title] = st.session_state.chat_history.copy()
-            current_instruction_for_save = st.session_state.temp_system_instruction if st.session_state.temp_system_instruction is not None else st.session_state.system_instructions.get(st.session_state.current_title, default_system_instruction)
-            st.session_state.system_instructions[st.session_state.current_title] = current_instruction_for_save
-            save_user_data_to_firestore(st.session_state.user_id)
+            # 로그인된 사용자만 저장
+            if st.session_state.is_logged_in:
+                st.session_state.saved_sessions[st.session_state.current_title] = st.session_state.chat_history.copy()
+                current_instruction_for_save = st.session_state.temp_system_instruction if st.session_state.temp_system_instruction is not None else st.session_state.system_instructions.get(st.session_state.current_title, default_system_instruction)
+                st.session_state.system_instructions[st.session_state.current_title] = current_instruction_for_save
+                save_user_data_to_firestore(st.session_state.user_id)
 
             st.rerun()

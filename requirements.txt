@@ -3,3 +3,4 @@ firebase-admin
 google-genai
 Pillow
 PyMuPDF
+Authlib
