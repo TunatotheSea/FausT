@@ -1,5 +1,5 @@
 streamlit
 firebase-admin
-google-generativeai
+google-genai
 Pillow
 PyMuPDF
