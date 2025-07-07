@@ -687,13 +687,12 @@ chat_display_container = st.container()
 
 # --- Final Chat History Display (Always Rendered) ---
 # FausT AI 아바타 및 사용자 아바타 상수 정의 (파일 상단으로 옮겨도 됩니다)
-FAUST_AI_AVATAR = "assets/faust_icon.png" # FausT의 아이콘 이미지 경로
-USER_AVATAR = "🧑‍⚕️" # 사용자 아바타 (의사 이모지 유지)
+# FAUST_AI_AVATAR = "assets/faust_icon.png" # FausT의 아이콘 이미지 경로
+# USER_AVATAR = "🧑‍⚕️" # 사용자 아바타 (의사 이모지 유지)
 
 with chat_display_container:
     for i, (role, message) in enumerate(st.session_state.chat_history):
-        with st.chat_message("ai" if role == "model" else "user", 
-                             avatar=FAUST_AI_AVATAR if role == "model" else USER_AVATAR): # 아바타 적용
+        with st.chat_message("ai" if role == "model" else "user"): # avatar 매개변수 삭제
             st.markdown(message)
             if role == "model" and i == len(st.session_state.chat_history) - 1 and not st.session_state.is_generating \
                 and not st.session_state.delete_confirmation_pending: 
